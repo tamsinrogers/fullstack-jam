@@ -124,7 +124,7 @@ async def add_companies_endpoint(
 ):
     # ensure target collection exists
     target_collection = db.query(database.CompanyCollection).filter(
-        database.CompanyCollection.id == request.target_collection_id
+        database.CompanyCollection.id == request.target_id
     ).first()
     if not target_collection:
         raise HTTPException(status_code=404, detail="Target collection not found")
@@ -135,7 +135,7 @@ async def add_companies_endpoint(
             batch_add_companies,
             db,
             request.company_ids,
-            request.target_collection_id
+            request.target_id
         )
         return {
             "status": "in_progress",
@@ -143,6 +143,23 @@ async def add_companies_endpoint(
         }
 
     # else: batch add companies
-    batch_add_companies(db, request.company_ids, request.target_collection_id)
+    batch_add_companies(db, request.company_ids, request.target_id)
     return {"status": "completed", "added": len(request.company_ids)}
 
+@router.get("/progress/{target_id}")
+def get_add_progress(target_id: uuid.UUID, db: Session = Depends(database.get_db)):
+    progress = db.query(CollectionAddProgress)\
+        .filter(CollectionAddProgress.target_collection_id == target_id)\
+        .order_by(CollectionAddProgress.id.desc())\
+        .first()
+
+    if not progress:
+        return {"status": "idle", "processed": 0, "total": 0}
+
+    percent_complete = round((progress.processed_companies / progress.total_companies) * 100, 2)
+    return {
+        "status": progress.status,
+        "processed": progress.processed_companies,
+        "total": progress.total_companies,
+        "percent_complete": percent_complete
+    }
