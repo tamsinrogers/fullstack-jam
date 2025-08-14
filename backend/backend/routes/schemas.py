@@ -1,5 +1,6 @@
 import uuid
-from pydantic import BaseModel
+from pydantic import BaseModel # type: ignore
+from typing import List
 
 class AddCompanies(BaseModel):
     company_ids: List[uuid.UUID]           

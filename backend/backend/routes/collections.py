@@ -70,3 +70,31 @@ def get_company_collection_by_id(
         companies=companies,
         total=total_count,
     )
+
+def batch_add_companies(
+    db: Session,
+    company_ids: list[uuid.UUID],
+    target_id: uuid.UUID,
+    batch_size: int = 100
+):
+    from backend.db.database import CompanyCollectionAssociation
+
+    for i in range(0, len(company_ids), batch_size):
+        batch_ids = company_ids[i:i + batch_size]
+
+        # check for companies that may already be in target
+        existing_assoc = db.query(CompanyCollectionAssociation.company_id)\
+            .filter(
+                CompanyCollectionAssociation.collection_id == target_id,
+                CompanyCollectionAssociation.company_id.in_(batch_ids)
+            ).all()
+        
+        existing_ids = {company_id for (company_id,) in existing_assoc}
+        new_ids = [company_id for company_id in batch_ids if company_id not in existing_ids]
+
+        associations = [
+            CompanyCollectionAssociation(collection_id=target_id, company_id=cid)
+            for cid in new_ids
+        ]
+        db.bulk_save_objects(associations)
+        db.commit()
