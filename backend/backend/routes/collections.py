@@ -11,6 +11,7 @@ from backend.routes.companies import (
     CompanyBatchOutput,
     fetch_companies_with_liked,
 )
+from backend.db.database import CompanyCollectionAssociation, CollectionAddProgress
 
 router = APIRouter(
     prefix="/collections",
@@ -77,8 +78,17 @@ def batch_add_companies(
     target_id: uuid.UUID,
     batch_size: int = 100
 ):
-    from backend.db.database import CompanyCollectionAssociation
-
+    # track progress
+    progress = CollectionAddProgress(
+        target_collection_id=target_id,
+        total_companies=len(company_ids),
+        processed_companies=0,
+        status="in_progress"
+    )
+    db.add(progress)
+    db.commit()
+    db.refresh(progress)
+    
     for i in range(0, len(company_ids), batch_size):
         batch_ids = company_ids[i:i + batch_size]
 
@@ -93,11 +103,18 @@ def batch_add_companies(
         new_ids = [company_id for company_id in batch_ids if company_id not in existing_ids]
 
         associations = [
-            CompanyCollectionAssociation(collection_id=target_id, company_id=cid)
-            for cid in new_ids
+            CompanyCollectionAssociation(collection_id=target_id, company_id=added_id)
+            for added_id in new_ids
         ]
+
         db.bulk_save_objects(associations)
         db.commit()
+
+        progress.processed_companies += len(new_ids)
+        db.commit()
+
+    progress.status = "completed"
+    db.commit()
 
 @router.post("/add-companies")
 async def add_companies_endpoint(
