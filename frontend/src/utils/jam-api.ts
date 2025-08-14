@@ -58,3 +58,21 @@ export async function getCollectionsMetadata(): Promise<ICollection[]> {
         throw error;
     }
 }
+
+export async function addCompanies(targetCollectionId: number, companyIds: number[]) {
+    const res = await fetch(`/api/collections/add-companies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_collection_id: targetCollectionId,
+        company_ids: companyIds
+      })
+    });
+    return res.json();
+  }
+  
+  export async function getAddProgress(targetCollectionId: number) {
+    const res = await fetch(`/api/collections/progress/${targetCollectionId}`);
+    return res.json();
+  }
+  
