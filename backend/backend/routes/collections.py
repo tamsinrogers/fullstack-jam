@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from .schemas import AddCompanies
 
 from backend.db import database
 from backend.routes.companies import (
