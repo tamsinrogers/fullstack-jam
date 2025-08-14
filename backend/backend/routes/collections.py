@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -98,3 +98,34 @@ def batch_add_companies(
         ]
         db.bulk_save_objects(associations)
         db.commit()
+
+@router.post("/add-companies")
+async def add_companies_endpoint(
+    request: AddCompanies,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(database.get_db)
+):
+    # ensure target collection exists
+    target_collection = db.query(database.CompanyCollection).filter(
+        database.CompanyCollection.id == request.target_collection_id
+    ).first()
+    if not target_collection:
+        raise HTTPException(status_code=404, detail="Target collection not found")
+
+    # run background task in case of large list
+    if len(request.company_ids) > 500:  
+        background_tasks.add_task(
+            batch_add_companies,
+            db,
+            request.company_ids,
+            request.target_collection_id
+        )
+        return {
+            "status": "in_progress",
+            "message": f"adding {len(request.company_ids)} companies in background..."
+        }
+
+    # else: batch add companies
+    batch_add_companies(db, request.company_ids, request.target_collection_id)
+    return {"status": "completed", "added": len(request.company_ids)}
+
