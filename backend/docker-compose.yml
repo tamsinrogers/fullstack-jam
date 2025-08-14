@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres-jam-db:
     image: postgres:15.0
