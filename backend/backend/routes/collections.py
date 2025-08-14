@@ -1,15 +1,17 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from .schemas import AddCompanies
 
 from backend.db import database
 from backend.routes.companies import (
     CompanyBatchOutput,
     fetch_companies_with_liked,
 )
+from backend.db.database import CompanyCollectionAssociation, CollectionAddProgress
 
 router = APIRouter(
     prefix="/collections",
@@ -69,3 +71,95 @@ def get_company_collection_by_id(
         companies=companies,
         total=total_count,
     )
+
+def batch_add_companies(
+    db: Session,
+    company_ids: list[uuid.UUID],
+    target_id: uuid.UUID,
+    batch_size: int = 100
+):
+    # track progress
+    progress = CollectionAddProgress(
+        target_collection_id=target_id,
+        total_companies=len(company_ids),
+        processed_companies=0,
+        status="in_progress"
+    )
+    db.add(progress)
+    db.commit()
+    db.refresh(progress)
+    
+    for i in range(0, len(company_ids), batch_size):
+        batch_ids = company_ids[i:i + batch_size]
+
+        # check for companies that may already be in target
+        existing_assoc = db.query(CompanyCollectionAssociation.company_id)\
+            .filter(
+                CompanyCollectionAssociation.collection_id == target_id,
+                CompanyCollectionAssociation.company_id.in_(batch_ids)
+            ).all()
+        
+        existing_ids = {company_id for (company_id,) in existing_assoc}
+        new_ids = [company_id for company_id in batch_ids if company_id not in existing_ids]
+
+        associations = [
+            CompanyCollectionAssociation(collection_id=target_id, company_id=added_id)
+            for added_id in new_ids
+        ]
+
+        db.bulk_save_objects(associations)
+        db.commit()
+
+        progress.processed_companies += len(new_ids)
+        db.commit()
+
+    progress.status = "completed"
+    db.commit()
+
+@router.post("/add-companies")
+async def add_companies_endpoint(
+    request: AddCompanies,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(database.get_db)
+):
+    # ensure target collection exists
+    target_collection = db.query(database.CompanyCollection).filter(
+        database.CompanyCollection.id == request.target_id
+    ).first()
+    if not target_collection:
+        raise HTTPException(status_code=404, detail="Target collection not found")
+
+    # run background task in case of large list
+    if len(request.company_ids) > 500:  
+        background_tasks.add_task(
+            batch_add_companies,
+            db,
+            request.company_ids,
+            request.target_id
+        )
+        return {
+            "status": "in_progress",
+            "message": f"adding {len(request.company_ids)} companies in background..."
+        }
+
+    # else: batch add companies
+    batch_add_companies(db, request.company_ids, request.target_id)
+    return {"status": "completed", "added": len(request.company_ids)}
+
+@router.get("/progress/{target_id}")
+def get_add_progress(target_id: uuid.UUID, db: Session = Depends(database.get_db)):
+    progress = db.query(CollectionAddProgress)\
+        .filter(CollectionAddProgress.target_collection_id == target_id)\
+        .order_by(CollectionAddProgress.id.desc())\
+        .first()
+
+    if not progress:
+        return {"status": "idle", "processed": 0, "total": 0}
+
+    percent_complete = round((progress.processed_companies / progress.total_companies) * 100, 2)
+    return {
+        "status": progress.status,
+        "processed": progress.processed_companies,
+        "total": progress.total_companies,
+        "percent_complete": percent_complete
+    }
