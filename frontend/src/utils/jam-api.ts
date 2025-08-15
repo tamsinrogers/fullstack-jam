@@ -63,9 +63,12 @@ export async function bulkMoveCompanies(
     }
 
     const data = await res.json();
-    if (!data.job_id) throw new Error('bulkMoveCompanies response missing job_id');
 
-    return data;
+    // Ensure we always have job_id
+    const job_id = data.job_id || data.jobId;
+    if (!job_id) throw new Error('bulkMoveCompanies response missing job_id');
+
+    return { job_id };
   } catch (err) {
     console.error('bulkMoveCompanies error', err);
     throw err;

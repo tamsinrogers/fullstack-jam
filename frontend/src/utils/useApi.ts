@@ -1,35 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { bulkMoveCompanies, getBulkMoveProgress } from './jam-api';
-
 
 const useApi = <T>(apiFunction: () => Promise<T>) => {
   const [data, setData] = useState<T>();
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  const reload = useCallback(async () => {
     setLoading(true);
-    apiFunction()
-      .then((response) => {
-        if (mounted) setData(response);
-      })
-      .catch((err) => {
-        if (mounted) setError(err.message || 'Unknown error');
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-
-    return () => {
-      mounted = false; // cancel if component unmounts
-    };
+    setError(null);
+    try {
+      const response = await apiFunction();
+      setData(response);
+    } catch (err: any) {
+      setError(err.message || 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
   }, [apiFunction]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { data, loading, error, reload };
 };
 
-interface BulkMoveProgressResponse {
+export default useApi;
+
+export interface BulkMoveProgressResponse {
   status: 'pending' | 'in_progress' | 'completed' | 'error';
   progress?: number;
   error?: string;
@@ -53,19 +52,19 @@ export const useBulkMoveCompanies = () => {
 
     try {
       setLoading(true);
+      setProgress(0);
       setError(null);
       setSuccess(false);
-      setProgress(0);
 
       const { job_id } = await bulkMoveCompanies(
         sourceCollectionId,
         targetCollectionId,
-        companyIds ?? [] 
+        companyIds ?? []
       );
 
       let isComplete = false;
       let attempts = 0;
-      const maxAttempts = 300; 
+      const maxAttempts = 300;
 
       while (!isComplete && attempts < maxAttempts) {
         const progressRes: BulkMoveProgressResponse = await getBulkMoveProgress(job_id);
@@ -74,6 +73,7 @@ export const useBulkMoveCompanies = () => {
         if (progressRes.status === 'error') {
           throw new Error(progressRes.error || 'Bulk move failed');
         }
+
         if (progressRes.status === 'completed') {
           isComplete = true;
         } else {
@@ -95,5 +95,3 @@ export const useBulkMoveCompanies = () => {
 
   return { startBulkMove, loading, progress, error, success };
 };
-
-export default useApi;

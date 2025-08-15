@@ -30,6 +30,7 @@ def seed_database(db: Session):
     db.execute(text("DROP TRIGGER IF EXISTS throttle_updates_trigger ON company_collection_associations;"))
     db.commit()
 
+    # Create 50,000 companies
     companies = [
         database.Company(company_name=randomname.get_name().replace("-", " ").title())
         for _ in range(50000)
@@ -37,6 +38,7 @@ def seed_database(db: Session):
     db.bulk_save_objects(companies)
     db.commit()
 
+    # Create "My List" with all 50,000 companies
     my_list = database.CompanyCollection(collection_name="My List")
     db.add(my_list)
     db.commit()
@@ -50,19 +52,13 @@ def seed_database(db: Session):
     db.bulk_save_objects(associations)
     db.commit()
 
+    # Create "Liked Companies List" EMPTY
     liked_companies = database.CompanyCollection(collection_name="Liked Companies List")
     db.add(liked_companies)
     db.commit()
+    # Do NOT add any associations here
 
-    associations = [
-        database.CompanyCollectionAssociation(
-            company_id=company.id, collection_id=liked_companies.id
-        )
-        for company in db.query(database.Company).limit(10).all()
-    ]
-    db.bulk_save_objects(associations)
-    db.commit()
-
+    # Throttle trigger to simulate slow inserts
     db.execute(
         text("""
 CREATE OR REPLACE FUNCTION throttle_updates()
