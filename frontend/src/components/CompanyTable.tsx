@@ -5,8 +5,8 @@ import useApi, { useBulkMoveCompanies } from '../utils/useApi';
 import { getCollectionsById, ICompany } from '../utils/jam-api';
 
 interface Props {
-  selectedCollectionId: string; // source
-  targetCollectionId: string;   // target
+  selectedCollectionId: string; // source collection
+  targetCollectionId: string;   // target collection
 }
 
 const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
@@ -17,13 +17,13 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
   const { startBulkMove, loading: moving, progress, success, error: moveError } =
     useBulkMoveCompanies();
 
-  // Stabilize the API function using useCallback
+  // Stable API function with useCallback
   const fetchCollection = useCallback(
     () => getCollectionsById(selectedCollectionId, offset, pageSize),
     [selectedCollectionId, offset, pageSize]
   );
 
-  const { data: collection, loading: fetching, error: fetchError } = useApi(fetchCollection);
+  const { data: collection, loading: fetching, error: fetchError, reload } = useApi(fetchCollection);
 
   const companies: ICompany[] = collection?.companies ?? [];
   const total = collection?.total ?? 0;
@@ -34,17 +34,22 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
     setSelectedIds([]);
   }, [selectedCollectionId]);
 
-  const handleAddSelected = () => {
-    const validUUIDs = companies.filter((c) => selectedIds.includes(c.id)).map((c) => c.id);
+  const handleAddSelected = async () => {
+    const validUUIDs = companies.filter(c => selectedIds.includes(c.id)).map(c => c.id);
     if (validUUIDs.length === 0) return;
-    startBulkMove(selectedCollectionId, targetCollectionId, validUUIDs);
+
+    await startBulkMove(selectedCollectionId, targetCollectionId, validUUIDs);
+    setSelectedIds([]);
+    reload?.(); // refresh the source collection
   };
 
-  const handleAddAll = () => {
-    startBulkMove(selectedCollectionId, targetCollectionId); // no companyIds = move all
+  const handleAddAll = async () => {
+    await startBulkMove(selectedCollectionId, targetCollectionId);
+    setSelectedIds([]);
+    reload?.(); // refresh the source collection
   };
 
-  const handleSelectAll = () => setSelectedIds(companies.map((c) => c.id));
+  const handleSelectAll = () => setSelectedIds(companies.map(c => c.id));
   const handleDeselectAll = () => setSelectedIds([]);
 
   return (
@@ -54,7 +59,7 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
           {moving ? `Moving... (${progress ?? 0}%)` : `Move ${selectedIds.length} to List`}
         </button>
 
-        <button onClick={handleAddAll} disabled={moving}>
+        <button onClick={handleAddAll} disabled={moving || companies.length === 0}>
           Move All
         </button>
 
