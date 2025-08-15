@@ -1,5 +1,3 @@
-# app/main.py
-
 import randomname
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
@@ -13,6 +11,7 @@ from backend.routes import collections, companies
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     database.Base.metadata.create_all(bind=database.engine)
 
     db = database.SessionLocal()
@@ -23,26 +22,17 @@ async def lifespan(app: FastAPI):
         db.commit()
         db.close()
     yield
-    # Clean up...
-
-
-app = FastAPI(lifespan=lifespan)
-
 
 def seed_database(db: Session):
     db.execute(text("TRUNCATE TABLE company_collections CASCADE;"))
     db.execute(text("TRUNCATE TABLE companies CASCADE;"))
     db.execute(text("TRUNCATE TABLE company_collection_associations CASCADE;"))
-    db.execute(
-        text("""
-    DROP TRIGGER IF EXISTS throttle_updates_trigger ON company_collection_associations;
-    """)
-    )
+    db.execute(text("DROP TRIGGER IF EXISTS throttle_updates_trigger ON company_collection_associations;"))
     db.commit()
 
     companies = [
         database.Company(company_name=randomname.get_name().replace("-", " ").title())
-        for _ in range(10000)
+        for _ in range(50000)
     ]
     db.bulk_save_objects(companies)
     db.commit()
@@ -73,21 +63,6 @@ def seed_database(db: Session):
     db.bulk_save_objects(associations)
     db.commit()
 
-    companies_to_ignore = database.CompanyCollection(
-        collection_name="Companies to Ignore List"
-    )
-    db.add(companies_to_ignore)
-    db.commit()
-
-    associations = [
-        database.CompanyCollectionAssociation(
-            company_id=company.id, collection_id=companies_to_ignore.id
-        )
-        for company in db.query(database.Company).limit(50).all()
-    ]
-    db.bulk_save_objects(associations)
-    db.commit()
-
     db.execute(
         text("""
 CREATE OR REPLACE FUNCTION throttle_updates()
@@ -97,7 +72,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-    """)
+        """)
     )
 
     db.execute(
@@ -106,10 +81,12 @@ CREATE TRIGGER throttle_updates_trigger
 BEFORE INSERT ON company_collection_associations
 FOR EACH ROW
 EXECUTE FUNCTION throttle_updates();
-    """)
+        """)
     )
     db.commit()
 
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(companies.router)
 app.include_router(collections.router)
@@ -117,7 +94,7 @@ app.include_router(collections.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
+        "http://localhost:5173",  # Vite frontend origin
     ],
     allow_credentials=True,
     allow_methods=["*"],

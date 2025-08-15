@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from backend.db import database
 
@@ -11,7 +12,7 @@ router = APIRouter(
 
 
 class CompanyOutput(BaseModel):
-    id: int
+    id: UUID  #
     company_name: str
     liked: bool
 
@@ -22,7 +23,7 @@ class CompanyBatchOutput(BaseModel):
 
 
 def fetch_companies_with_liked(
-    db: Session, company_ids: list[int]
+    db: Session, company_ids: list[UUID] 
 ) -> list[CompanyOutput]:
     liked_list = (
         db.query(database.CompanyCollection)
@@ -51,7 +52,7 @@ def fetch_companies_with_liked(
         CompanyOutput(
             id=company.id,
             company_name=company.company_name,
-            liked=True if liked else False,
+            liked=liked,
         )
         for company, liked in results
     ]

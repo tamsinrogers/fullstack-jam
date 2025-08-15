@@ -1,95 +1,98 @@
 import uuid
-from typing import Literal, Optional
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+import time
+import threading
+from typing import List, Optional
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from backend.db import database
-from backend.db.database import (
-    CompanyCollection,
-    CompanyCollectionAssociation,
-    CollectionAddProgress
-)
-from .collections import add_companies_in_batches
+router = APIRouter()
 
-router = APIRouter(
-    prefix="/bulk-move",
-    tags=["bulk-move"],
-)
+PROGRESS_STORE = {}
 
 class BulkMoveRequest(BaseModel):
-    source_list_id: uuid.UUID
-    target_list_id: uuid.UUID
-    mode: Literal["subset", "all"]
-    company_ids: Optional[list[int]] = None 
+    toCollectionId: str
+    companyIds: Optional[List[int]] = None
+    all: Optional[bool] = False
 
-class JobStatusResponse(BaseModel):
-    job_id: uuid.UUID
-    status: str
+class ProgressResponse(BaseModel):
+    jobId: str
+    status: str  
     processed: int
     total: int
-    percent_complete: float
+    error: Optional[str] = None
 
-def add_all_companies_job(db: Session, source_id: uuid.UUID, target_id: uuid.UUID):
-    ids = [
-        cid for (cid,) in db.query(CompanyCollectionAssociation.company_id)
-        .filter(CompanyCollectionAssociation.collection_id == source_id)
-        .all()
-    ]
-    add_companies_in_batches(db, ids, target_id)
 
-@router.post("")
-def start_bulk_move(
-    req: BulkMoveRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(database.get_db)
-):
-    src = db.query(CompanyCollection).get(req.source_list_id)
-    tgt = db.query(CompanyCollection).get(req.target_list_id)
-    if not src or not tgt:
-        raise HTTPException(status_code=404, detail="source not found not found")
+def get_company_ids_for_collection(collection_id: str) -> List[int]:
+    return list(range(1, 50001))  # pretend 50k companies
 
-    # progress bar
-    job_id = uuid.uuid4()
-    if req.mode == "subset":
-        if not req.company_ids:
-            raise HTTPException(status_code=400, detail="company_ids required for subset mode")
-        total = len(req.company_ids)
-    else:
-        total = db.query(func.count()).select_from(CompanyCollectionAssociation)\
-            .filter(CompanyCollectionAssociation.collection_id == req.source_list_id)\
-            .scalar()
+def move_companies_batch(from_collection: str, to_collection: str, ids: List[int]):
+    time.sleep(0.05) 
 
-    progress = CollectionAddProgress(
-        id=job_id,
-        target_collection_id=req.target_list_id,
-        total_companies=total,
-        processed_companies=0,
-        status="in_progress"
-    )
-    db.add(progress)
-    db.commit()
+def _run_bulk_move(job_id: str, from_collection: str, req: BulkMoveRequest):
+    try:
+        PROGRESS_STORE[job_id]["status"] = "running"
+        
+        if req.all:
+            ids = get_company_ids_for_collection(from_collection)
+        else:
+            ids = req.companyIds or []
+        total = len(ids)
+        PROGRESS_STORE[job_id]["total"] = total
+        PROGRESS_STORE[job_id]["processed"] = 0
 
-    # start job
-    if req.mode == "subset":
-        background_tasks.add_task(add_companies_in_batches, db, req.company_ids, req.target_list_id)
-    else:
-        background_tasks.add_task(add_all_companies_job, db, req.source_list_id, req.target_list_id)
+        batch_size = 200 
+        throttle_sleep = 0.1  # batch step
 
-    return {"job_id": job_id, "status": "started", "total": total}
+        for i in range(0, total, batch_size):
+            if PROGRESS_STORE[job_id].get("cancelled"):
+                PROGRESS_STORE[job_id]["status"] = "cancelled"
+                return
+            batch = ids[i:i+batch_size]
+            move_companies_batch(from_collection, req.toCollectionId, batch)  
+            PROGRESS_STORE[job_id]["processed"] += len(batch)
 
-@router.get("/{job_id}", response_model=JobStatusResponse)
-def get_job_status(job_id: uuid.UUID, db: Session = Depends(database.get_db)):
-    progress = db.query(CollectionAddProgress).filter(CollectionAddProgress.id == job_id).first()
-    if not progress:
+            PROGRESS_STORE[job_id]["percent"] = int(PROGRESS_STORE[job_id]["processed"] / max(1, total) * 100)
+
+            time.sleep(throttle_sleep)
+
+        PROGRESS_STORE[job_id]["status"] = "complete"
+    except Exception as e:
+        PROGRESS_STORE[job_id]["status"] = "failed"
+        PROGRESS_STORE[job_id]["error"] = str(e)
+
+@router.post("/api/collections/{from_collection_id}/bulk-move")
+def start_bulk_move(from_collection_id: str, req: BulkMoveRequest, background_tasks: BackgroundTasks):
+    job_id = str(uuid.uuid4())
+    PROGRESS_STORE[job_id] = {
+        "jobId": job_id,
+        "status": "queued",
+        "processed": 0,
+        "total": 0,
+        "percent": 0,
+        "error": None,
+    }
+
+    t = threading.Thread(target=_run_bulk_move, args=(job_id, from_collection_id, req), daemon=True)
+    t.start()
+    return {"jobId": job_id}
+
+@router.get("/api/bulk-move/{job_id}/progress", response_model=ProgressResponse)
+def get_bulk_move_progress(job_id: str):
+    p = PROGRESS_STORE.get(job_id)
+    if not p:
         raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "jobId": job_id,
+        "status": p["status"],
+        "processed": p["processed"],
+        "total": p["total"],
+        "error": p.get("error"),
+    }
 
-    pct = (progress.processed_companies / progress.total_companies * 100) if progress.total_companies else 0.0
-    return JobStatusResponse(
-        job_id=progress.id,
-        status=progress.status,
-        processed=progress.processed_companies,
-        total=progress.total_companies,
-        percent_complete=round(pct, 2)
-    )
+@router.post("/api/bulk-move/{job_id}/cancel")
+def cancel_bulk_move(job_id: str):
+    p = PROGRESS_STORE.get(job_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Job not found")
+    p["cancelled"] = True
+    return {"ok": True}
