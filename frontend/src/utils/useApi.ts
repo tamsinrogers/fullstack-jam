@@ -1,7 +1,41 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { bulkMoveCompanies, getBulkMoveProgress } from './jam-api';
 
-export function useBulkMoveCompanies() {
+
+const useApi = <T>(apiFunction: () => Promise<T>) => {
+  const [data, setData] = useState<T>();
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    apiFunction()
+      .then((response) => {
+        if (mounted) setData(response);
+      })
+      .catch((err) => {
+        if (mounted) setError(err.message || 'Unknown error');
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false; // cancel if component unmounts
+    };
+  }, [apiFunction]);
+
+  return { data, loading, error };
+};
+
+interface BulkMoveProgressResponse {
+  status: 'pending' | 'in_progress' | 'completed' | 'error';
+  progress?: number;
+  error?: string;
+}
+
+export const useBulkMoveCompanies = () => {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
@@ -10,10 +44,10 @@ export function useBulkMoveCompanies() {
   const startBulkMove = async (
     sourceCollectionId: string,
     targetCollectionId: string,
-    companyIds: string[]
+    companyIds?: string[]
   ) => {
-    if (companyIds.length === 0) {
-      console.warn('No valid UUIDs selected, aborting bulk move');
+    if (!sourceCollectionId || !targetCollectionId) {
+      setError('Source or target collection ID is missing');
       return;
     }
 
@@ -23,21 +57,36 @@ export function useBulkMoveCompanies() {
       setSuccess(false);
       setProgress(0);
 
-      const res = await bulkMoveCompanies(sourceCollectionId, targetCollectionId, companyIds);
-      const jobId = res.job_id;
+      const { job_id } = await bulkMoveCompanies(
+        sourceCollectionId,
+        targetCollectionId,
+        companyIds ?? [] 
+      );
 
       let isComplete = false;
-      while (!isComplete) {
-        const { progress: p, status, error: errMsg } = await getBulkMoveProgress(jobId);
-        setProgress(p);
+      let attempts = 0;
+      const maxAttempts = 300; 
 
-        if (status === 'error') throw new Error(errMsg || 'Bulk move failed');
-        if (status === 'completed') isComplete = true;
-        else await new Promise((r) => setTimeout(r, 1000));
+      while (!isComplete && attempts < maxAttempts) {
+        const progressRes: BulkMoveProgressResponse = await getBulkMoveProgress(job_id);
+        setProgress(progressRes.progress ?? 0);
+
+        if (progressRes.status === 'error') {
+          throw new Error(progressRes.error || 'Bulk move failed');
+        }
+        if (progressRes.status === 'completed') {
+          isComplete = true;
+        } else {
+          attempts++;
+          await new Promise((res) => setTimeout(res, 1000));
+        }
       }
+
+      if (!isComplete) throw new Error('Bulk move timed out');
 
       setSuccess(true);
     } catch (err: any) {
+      console.error('Bulk move error', err);
       setError(err.message || 'Error moving companies');
     } finally {
       setLoading(false);
@@ -45,4 +94,6 @@ export function useBulkMoveCompanies() {
   };
 
   return { startBulkMove, loading, progress, error, success };
-}
+};
+
+export default useApi;

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export interface ICompany {
-  id: string; //this is the UUID
+  id: string; // UUID
   company_name: string;
   liked: boolean;
 }
@@ -17,26 +17,21 @@ export interface ICompanyBatchResponse {
   companies: ICompany[];
 }
 
+export interface IBulkMoveProgress {
+  status: 'pending' | 'in_progress' | 'completed' | 'error';
+  progress: number;
+  error?: string;
+}
+
 const BASE_URL = 'http://localhost:8000';
 
-export async function getCompanies(
-  offset?: number,
-  limit?: number
-): Promise<ICompanyBatchResponse> {
-  const { data } = await axios.get(`${BASE_URL}/companies`, {
-    params: { offset, limit },
-  });
+export async function getCompanies(offset?: number, limit?: number): Promise<ICompanyBatchResponse> {
+  const { data } = await axios.get(`${BASE_URL}/companies`, { params: { offset, limit } });
   return data;
 }
 
-export async function getCollectionsById(
-  id: string,
-  offset?: number,
-  limit?: number
-): Promise<ICollection> {
-  const { data } = await axios.get(`${BASE_URL}/collections/${id}`, {
-    params: { offset, limit },
-  });
+export async function getCollectionsById(id: string, offset?: number, limit?: number): Promise<ICollection> {
+  const { data } = await axios.get(`${BASE_URL}/collections/${id}`, { params: { offset, limit } });
   return data;
 }
 
@@ -48,11 +43,9 @@ export async function getCollectionsMetadata(): Promise<ICollection[]> {
 export async function bulkMoveCompanies(
   sourceCollectionId: string,
   targetCollectionId: string,
-  companyIds: string[]
+  companyIds: string[] = []
 ): Promise<{ job_id: string }> {
   try {
-    console.log('bulkMoveCompanies payload:', { sourceCollectionId, targetCollectionId, companyIds });
-
     const res = await fetch(`${BASE_URL}/collections/add-companies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -65,15 +58,13 @@ export async function bulkMoveCompanies(
 
     if (!res.ok) {
       const text = await res.text();
-      console.error('Bulk move request failed:', res.status, res.statusText, text);
+      console.error('Bulk move request failed', { status: res.status, text });
       throw new Error(`Bulk move request failed: ${res.status} ${res.statusText}`);
     }
 
     const data = await res.json();
-    console.log('bulkMoveCompanies returned', data);
-    if (!data.job_id) {
-      throw new Error('bulkMoveCompanies response missing job_id');
-    }
+    if (!data.job_id) throw new Error('bulkMoveCompanies response missing job_id');
+
     return data;
   } catch (err) {
     console.error('bulkMoveCompanies error', err);
@@ -81,19 +72,16 @@ export async function bulkMoveCompanies(
   }
 }
 
-export async function getBulkMoveProgress(
-  jobId: string
-): Promise<{ progress: number; status: string; error?: string }> {
+export async function getBulkMoveProgress(jobId: string): Promise<IBulkMoveProgress> {
   try {
     const res = await fetch(`${BASE_URL}/collections/progress/${jobId}`);
     if (!res.ok) {
       const text = await res.text();
-      console.error('Progress request failed:', res.status, res.statusText, text);
+      console.error('Progress request failed', { status: res.status, text });
       throw new Error(`Progress request failed: ${res.status} ${res.statusText}`);
     }
 
-    const data = await res.json();
-    console.log('getBulkMoveProgress returned', data);
+    const data: IBulkMoveProgress = await res.json();
     return data;
   } catch (err) {
     console.error('getBulkMoveProgress error', err);

@@ -1,30 +1,28 @@
 import { DataGrid } from '@mui/x-data-grid';
-import { useEffect, useState } from 'react';
 import LinearProgress from '@mui/material/LinearProgress';
+import { useEffect, useState } from 'react';
+import useApi, { useBulkMoveCompanies } from '../utils/useApi';
 import { getCollectionsById, ICompany } from '../utils/jam-api';
-import { useBulkMoveCompanies } from '../utils/useApi';
 
 interface Props {
-  selectedCollectionId: string;
-  targetCollectionId: string;
+  selectedCollectionId: string; // source
+  targetCollectionId: string;   // target
 }
 
 const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
-  const [response, setResponse] = useState<ICompany[]>([]);
-  const [total, setTotal] = useState<number>(0);
   const [offset, setOffset] = useState<number>(0);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState<number>(25);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const { startBulkMove, loading, progress, success, error } = useBulkMoveCompanies();
+  const { startBulkMove, loading: moving, progress, success, error: moveError } =
+    useBulkMoveCompanies();
 
-  useEffect(() => {
-    getCollectionsById(selectedCollectionId, offset, pageSize).then((data) => {
-      setResponse(data.companies);
-      setTotal(data.total);
-      console.log('Fetched companies:', data.companies);
-    });
-  }, [selectedCollectionId, offset, pageSize]);
+  const { data: collection, loading: fetching, error: fetchError } = useApi(() =>
+    getCollectionsById(selectedCollectionId, offset, pageSize)
+  );
+
+  const companies: ICompany[] = collection?.companies ?? [];
+  const total = collection?.total ?? 0;
 
   useEffect(() => {
     setOffset(0);
@@ -32,43 +30,48 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
   }, [selectedCollectionId]);
 
   const handleAddSelected = () => {
-    const validUUIDs = response
-      .filter((c) => selectedIds.includes(c.id))
-      .map((c) => c.id);
-
-    if (validUUIDs.length === 0) {
-      console.warn('No valid UUIDs selected, aborting bulk move');
-      return;
-    }
-
+    const validUUIDs = companies.filter((c) => selectedIds.includes(c.id)).map((c) => c.id);
+    if (validUUIDs.length === 0) return;
     startBulkMove(selectedCollectionId, targetCollectionId, validUUIDs);
   };
 
-  const handleSelectAll = () => setSelectedIds(response.map((c) => c.id));
+  const handleAddAll = () => {
+    startBulkMove(selectedCollectionId, targetCollectionId); // no companyIds = move all
+  };
+
+  const handleSelectAll = () => setSelectedIds(companies.map((c) => c.id));
   const handleDeselectAll = () => setSelectedIds([]);
 
   return (
     <div style={{ height: 700, width: '100%' }}>
       <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button onClick={handleAddSelected} disabled={selectedIds.length === 0 || loading}>
-          {loading ? `Adding... (${progress ?? 0}%)` : `Add ${selectedIds.length} to List`}
+        <button onClick={handleAddSelected} disabled={selectedIds.length === 0 || moving}>
+          {moving ? `Moving... (${progress ?? 0}%)` : `Move ${selectedIds.length} to List`}
         </button>
-        <button onClick={handleSelectAll} disabled={selectedIds.length === response.length || loading}>
+
+        <button onClick={handleAddAll} disabled={moving}>
+          Move All
+        </button>
+
+        <button onClick={handleSelectAll} disabled={selectedIds.length === companies.length || moving}>
           Select All
         </button>
-        <button onClick={handleDeselectAll} disabled={selectedIds.length === 0 || loading}>
+
+        <button onClick={handleDeselectAll} disabled={selectedIds.length === 0 || moving}>
           Deselect All
         </button>
-        {success && <span style={{ color: 'green' }}>Added successfully!</span>}
-        {error && <span style={{ color: 'red' }}>Failed to add.</span>}
+
+        {success && <span style={{ color: 'green' }}>✅ Moved successfully!</span>}
+        {moveError && <span style={{ color: 'red' }}>❌ Failed to move.</span>}
+        {fetchError && <span style={{ color: 'red' }}>❌ Failed to fetch companies.</span>}
       </div>
 
-      {loading && <LinearProgress variant="determinate" value={progress} />}
+      {(moving || fetching) && <LinearProgress variant="determinate" value={progress} />}
 
       <DataGrid
-        rows={response}
+        rows={companies}
         rowHeight={30}
-        columns={[{ field: 'company_name', headerName: 'Company Name', width: 200 }]}
+        columns={[{ field: 'company_name', headerName: 'Company Name', width: 250 }]}
         initialState={{ pagination: { paginationModel: { page: 0, pageSize } } }}
         rowCount={total}
         pagination
@@ -78,8 +81,9 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
           setPageSize(newMeta.pageSize);
           setOffset(newMeta.page * newMeta.pageSize);
         }}
-        onRowSelectionModelChange={(ids) => setSelectedIds(ids.map((id) => String(id)))}
+        onRowSelectionModelChange={(ids) => setSelectedIds(ids.map(String))}
         rowSelectionModel={selectedIds}
+        loading={fetching}
       />
     </div>
   );
