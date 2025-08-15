@@ -1,32 +1,48 @@
-import { useState, useCallback } from "react";
+import { useState } from 'react';
+import { bulkMoveCompanies, getBulkMoveProgress } from './jam-api';
 
-const useApi = <T, Args extends any[]>(
-  apiFunction: (...args: Args) => Promise<T>,
-
-) => {
-  const [data, setData] = useState<T>();
-  const [loading, setLoading] = useState<boolean>(false);
+export function useBulkMoveCompanies() {
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const execute = useCallback(
-    async (...args: Args) => {
+  const startBulkMove = async (
+    sourceCollectionId: string,
+    targetCollectionId: string,
+    companyIds: string[]
+  ) => {
+    if (companyIds.length === 0) {
+      console.warn('No valid UUIDs selected, aborting bulk move');
+      return;
+    }
+
+    try {
       setLoading(true);
       setError(null);
-      try {
-        const response = await apiFunction(...args);
-        setData(response);
-        return response;
-      } catch (err: any) {
-        setError(err.message || "Unknown error");
-        throw err;
-      } finally {
-        setLoading(false);
+      setSuccess(false);
+      setProgress(0);
+
+      const res = await bulkMoveCompanies(sourceCollectionId, targetCollectionId, companyIds);
+      const jobId = res.job_id;
+
+      let isComplete = false;
+      while (!isComplete) {
+        const { progress: p, status, error: errMsg } = await getBulkMoveProgress(jobId);
+        setProgress(p);
+
+        if (status === 'error') throw new Error(errMsg || 'Bulk move failed');
+        if (status === 'completed') isComplete = true;
+        else await new Promise((r) => setTimeout(r, 1000));
       }
-    },
-    [apiFunction]
-  );
 
-  return { data, loading, error, execute };
-};
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err.message || 'Error moving companies');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-export default useApi;
+  return { startBulkMove, loading, progress, error, success };
+}

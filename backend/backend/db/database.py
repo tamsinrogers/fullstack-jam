@@ -1,4 +1,3 @@
-# app/database.py
 import os
 import uuid
 from datetime import datetime, timezone
@@ -8,8 +7,8 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
-    Integer,
     String,
+    Integer,
     UniqueConstraint,
     create_engine,
     func,
@@ -32,8 +31,6 @@ def get_db():
     finally:
         db.close()
 
-
-# SQLAlchemy models
 Base = declarative_base()
 
 class Settings(Base):
@@ -45,18 +42,22 @@ class Company(Base):
     __tablename__ = "companies"
 
     created_at: Union[datetime, Column[datetime]] = Column(
-    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
+    )
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     company_name = Column(String, index=True)
+
 
 class CompanyCollection(Base):
     __tablename__ = "company_collections"
 
     created_at: Union[datetime, Column[datetime]] = Column(
-    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
+    )
     id: Column[uuid.UUID] = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     collection_name = Column(String, index=True)
+
 
 class CompanyCollectionAssociation(Base):
     __tablename__ = "company_collection_associations"
@@ -66,19 +67,21 @@ class CompanyCollectionAssociation(Base):
     )
     
     created_at: Union[datetime, Column[datetime]] = Column(
-    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
+    )
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"))
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"))
     collection_id = Column(UUID(as_uuid=True), ForeignKey("company_collections.id"))
+
 
 class CollectionAddProgress(Base):
     __tablename__ = "collection_add_progress"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    target_id = Column(UUID(as_uuid=True), ForeignKey("company.id"), nullable=False)
+    target_collection_id = Column(UUID(as_uuid=True), ForeignKey("company_collections.id"), nullable=False)
     total_companies = Column(Integer, nullable=False)
     processed_companies = Column(Integer, default=0)
     status = Column(String, default="in_progress")  # "in_progress" or "completed"
     created_at: Union[datetime, Column[datetime]] = Column(
-    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
-)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
+    )
