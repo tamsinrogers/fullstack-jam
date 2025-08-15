@@ -15,12 +15,11 @@ class BulkMoveRequest(BaseModel):
     all: Optional[bool] = False
 
 class ProgressResponse(BaseModel):
-    jobId: str
+    job_id: str
     status: str  
     processed: int
     total: int
     error: Optional[str] = None
-
 
 def get_company_ids_for_collection(collection_id: str) -> List[int]:
     return list(range(1, 50001))  # pretend 50k companies
@@ -41,18 +40,16 @@ def _run_bulk_move(job_id: str, from_collection: str, req: BulkMoveRequest):
         PROGRESS_STORE[job_id]["processed"] = 0
 
         batch_size = 200 
-        throttle_sleep = 0.1  # batch step
+        throttle_sleep = 0.1
 
         for i in range(0, total, batch_size):
             if PROGRESS_STORE[job_id].get("cancelled"):
                 PROGRESS_STORE[job_id]["status"] = "cancelled"
                 return
             batch = ids[i:i+batch_size]
-            move_companies_batch(from_collection, req.toCollectionId, batch)  
+            move_companies_batch(from_collection, req.toCollectionId, batch)
             PROGRESS_STORE[job_id]["processed"] += len(batch)
-
             PROGRESS_STORE[job_id]["percent"] = int(PROGRESS_STORE[job_id]["processed"] / max(1, total) * 100)
-
             time.sleep(throttle_sleep)
 
         PROGRESS_STORE[job_id]["status"] = "complete"
@@ -64,7 +61,7 @@ def _run_bulk_move(job_id: str, from_collection: str, req: BulkMoveRequest):
 def start_bulk_move(from_collection_id: str, req: BulkMoveRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
     PROGRESS_STORE[job_id] = {
-        "jobId": job_id,
+        "job_id": job_id,       # changed from "jobId"
         "status": "queued",
         "processed": 0,
         "total": 0,
@@ -74,7 +71,7 @@ def start_bulk_move(from_collection_id: str, req: BulkMoveRequest, background_ta
 
     t = threading.Thread(target=_run_bulk_move, args=(job_id, from_collection_id, req), daemon=True)
     t.start()
-    return {"jobId": job_id}
+    return {"job_id": job_id}   # changed from "jobId"
 
 @router.get("/api/bulk-move/{job_id}/progress", response_model=ProgressResponse)
 def get_bulk_move_progress(job_id: str):
@@ -82,7 +79,7 @@ def get_bulk_move_progress(job_id: str):
     if not p:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
-        "jobId": job_id,
+        "job_id": job_id,   # changed from "jobId"
         "status": p["status"],
         "processed": p["processed"],
         "total": p["total"],
