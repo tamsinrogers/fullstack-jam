@@ -1,6 +1,6 @@
 import { DataGrid } from '@mui/x-data-grid';
 import LinearProgress from '@mui/material/LinearProgress';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import useApi, { useBulkMoveCompanies } from '../utils/useApi';
 import { getCollectionsById, ICompany } from '../utils/jam-api';
 
@@ -17,13 +17,18 @@ const CompanyTable = ({ selectedCollectionId, targetCollectionId }: Props) => {
   const { startBulkMove, loading: moving, progress, success, error: moveError } =
     useBulkMoveCompanies();
 
-  const { data: collection, loading: fetching, error: fetchError } = useApi(() =>
-    getCollectionsById(selectedCollectionId, offset, pageSize)
+  // Stabilize the API function using useCallback
+  const fetchCollection = useCallback(
+    () => getCollectionsById(selectedCollectionId, offset, pageSize),
+    [selectedCollectionId, offset, pageSize]
   );
+
+  const { data: collection, loading: fetching, error: fetchError } = useApi(fetchCollection);
 
   const companies: ICompany[] = collection?.companies ?? [];
   const total = collection?.total ?? 0;
 
+  // Reset offset and selection when collection changes
   useEffect(() => {
     setOffset(0);
     setSelectedIds([]);
